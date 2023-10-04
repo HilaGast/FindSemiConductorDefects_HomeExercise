@@ -1,24 +1,16 @@
-from typing import Tuple, Sequence
-import numpy as np
-import matplotlib.pyplot as plt
-import skimage
-from cv2 import (
-    DMatch,
-    KeyPoint,
-    imread,
-    IMREAD_GRAYSCALE,
-    NORM_HAMMING,
-    BFMatcher,
-    estimateAffinePartial2D,
-    fastNlMeansDenoising,
-    connectedComponentsWithStats,
-    warpAffine,
-)
+import argparse
+from typing import Sequence, Tuple
+
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import skimage
+from cv2 import (IMREAD_GRAYSCALE, NORM_HAMMING, BFMatcher, DMatch, KeyPoint,
+                 connectedComponentsWithStats, estimateAffinePartial2D,
+                 fastNlMeansDenoising, imread, warpAffine)
 from scipy.ndimage import gaussian_filter
 from skimage.morphology import dilation, disk
 from sklearn.cluster import KMeans
-import argparse
 
 
 def find_defects(reference_path: str, inspected_path: str, should_plot: bool = True) -> None:
