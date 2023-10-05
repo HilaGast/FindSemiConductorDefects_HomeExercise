@@ -13,6 +13,7 @@ from cv2 import (
     fastNlMeansDenoising,
     imread,
     warpAffine,
+    imwrite,
 )
 from skimage.morphology import dilation, disk, erosion
 from skimage.exposure import match_histograms
@@ -72,6 +73,7 @@ def find_defects(reference_path: str, inspected_path: str, should_plot: bool = T
 
     # Combine masks, keeping only the pixels that are different in both masks:
     mask = kmeans_mask * contour_mask
+    mask = mask.astype("uint8") * 255
 
     if should_plot:
         plot_results(
@@ -82,11 +84,22 @@ def find_defects(reference_path: str, inspected_path: str, should_plot: bool = T
             title="Final mask result",
         )
 
+    # Save the mask to a file:
+    save_mask(mask, inspected_path)
+
 
 def read_image(path: str) -> np.ndarray:
     # Read the image and convert to grayscale:
     img = imread(path, IMREAD_GRAYSCALE)
     return img
+
+
+def save_mask(mask: np.ndarray, inspected_path: str) -> None:
+    # Save the mask to a file
+    insp_file_parts = inspected_path.split(".")
+    path = insp_file_parts[0] + "_mask.png"
+    mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+    imwrite(path, mask)
 
 
 def preprocess(
@@ -433,8 +446,8 @@ def plot_results(
 
 def main() -> None:
     find_defects(
-        r"MuseAI_HomeExercise/home_exercise/defective_examples/case1_reference_image.tif",
-        r"MuseAI_HomeExercise/home_exercise/defective_examples/case1_inspected_image.tif",
+        r"MuseAI_HomeExercise\home_exercise\non_defective_examples\case3_reference_image.tif",
+        r"MuseAI_HomeExercise\home_exercise\non_defective_examples\case3_inspected_image.tif",
         should_plot=True,
     )
 
