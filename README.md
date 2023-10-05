@@ -2,7 +2,7 @@
 Detect differences between two similar images to find defects
 
 ## Code environment:
-Python 			3.11.2
+Python 			        3.11.2
 
 matplotlib        	3.8.0
 
