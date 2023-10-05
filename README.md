@@ -16,7 +16,7 @@ scikit-learn      	1.3.1
 
 scipy             	1.11.3
 
-Assumptions:
+## Assumptions:
 - Grayscale images with 3 graded intensities as input
 - Images size around 300-500 pixels in each direction
 - Uses translation registration: assumes no shearing, 	reflection, scaling or rotation between images
