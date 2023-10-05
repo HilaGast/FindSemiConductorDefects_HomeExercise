@@ -1,10 +1,12 @@
-from MuseAI_HomeExercise.detect_differences import read_image
-import cv2
-import numpy as np
 import random
-import skimage
+
+import cv2
 import matplotlib.pyplot as plt
+import numpy as np
+import skimage
 from PIL import Image
+
+from MuseAI_HomeExercise.detect_differences import read_image
 
 
 def create_new_images(image, n=10):

@@ -1,16 +1,26 @@
-import argparse
 from typing import Sequence, Tuple
-
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import skimage
-from cv2 import (IMREAD_GRAYSCALE, NORM_HAMMING, BFMatcher, DMatch, KeyPoint,
-                 connectedComponentsWithStats, estimateAffinePartial2D,
-                 fastNlMeansDenoising, imread, warpAffine)
-from scipy.ndimage import gaussian_filter
-from skimage.morphology import dilation, disk
+import cv2
+from cv2 import (
+    IMREAD_GRAYSCALE,
+    NORM_HAMMING,
+    BFMatcher,
+    DMatch,
+    KeyPoint,
+    connectedComponentsWithStats,
+    estimateAffinePartial2D,
+    fastNlMeansDenoising,
+    imread,
+    warpAffine,
+)
+from skimage.morphology import dilation, disk, erosion
+from skimage.exposure import match_histograms
+from skimage.filters import threshold_otsu
+from skimage.feature import canny
+from skimage.metrics import structural_similarity
 from sklearn.cluster import KMeans
+from scipy.ndimage import gaussian_filter
 
 
 def find_defects(reference_path: str, inspected_path: str, should_plot: bool = True) -> None:
@@ -34,7 +44,11 @@ def find_defects(reference_path: str, inspected_path: str, should_plot: bool = T
     kmeans_mask = create_kmeans_mask(preprocessed_insp, preprocessed_ref, object_min_size=30)
     if should_plot:
         plot_results(
-            ref_img, insp_img, kmeans_mask, labels=("reference", "inspected", "Kmeans mask"), title="Kmeans mask result"
+            preprocessed_ref,
+            preprocessed_insp,
+            kmeans_mask,
+            labels=("preprocessed reference", "preprocessed inspected", "Kmeans mask"),
+            title="Kmeans mask result",
         )
 
     # Create 2nd mask using the contours difference between the two images
@@ -43,16 +57,16 @@ def find_defects(reference_path: str, inspected_path: str, should_plot: bool = T
         preprocessed_ref,
         sigma_contour=1,
         sigma_gaussian=2,
-        kernel_size=3,
-        object_min_size=100,
+        kernel_size=4,
+        object_min_size=80,
     )
 
     if should_plot:
         plot_results(
-            ref_img,
-            insp_img,
+            preprocessed_ref,
+            preprocessed_insp,
             contour_mask,
-            labels=("reference", "inspected", "contour mask"),
+            labels=("preprocessed reference", "preprocessed inspected", "contour mask"),
             title="Contour mask result",
         )
 
@@ -64,8 +78,8 @@ def find_defects(reference_path: str, inspected_path: str, should_plot: bool = T
             ref_img,
             insp_img,
             mask,
-            labels=("reference", "inspected", "mask"),
-            title="Masks",
+            labels=("reference (original)", "inspected (original)", "mask"),
+            title="Final mask result",
         )
 
 
@@ -105,13 +119,14 @@ def preprocess(
     # Image denoise:
     denoised_insp_img = denoise_image(hist_matched_insp_img, h=7, template_window_size=7, search_window_size=21)
     denoised_ref_img = denoise_image(translated_ref_img, h=7, template_window_size=7, search_window_size=21)
+    denoised_insp_img = match_histogram(denoised_ref_img, denoised_insp_img)
 
     return denoised_insp_img, denoised_ref_img
 
 
 def match_histogram(reference: np.ndarray, moving: np.ndarray) -> np.ndarray:
     # Perform histogram matching between two images:
-    matched = skimage.exposure.match_histograms(moving, reference)
+    matched = match_histograms(moving, reference)
     matched = matched.astype("uint8")
     return matched
 
@@ -122,14 +137,16 @@ def get_matching_features_orb(
     nfeatures: int,
     top_matches_to_use: float = 0.5,
 ) -> tuple[Sequence[KeyPoint], Sequence[KeyPoint], list[DMatch]]:
-    """get matching features between two images using ORB
+    """Get matching features between two images using ORB (Oriented FAST and Rotated BRIEF) detector
     Input:
-        target: reference image for registration
-        moving: moving image to register
+        moving: numpy array of the moving image
+        target: numpy array of the target image
+        nfeatures: number of features to detect at first
+        top_matches_to_use: percentage of the top matches to use for the translation matrix calculation
     Output:
-        kp1: key points of the moving image
-        kp2: key points of the target image
-        matches: matching features
+        moving_keypoints: keypoints of the moving image
+        target_keypoints: keypoints of the target image
+        top_matches: matching features
     """
     # Initiate ORB detector:
     orb = cv2.ORB_create(nfeatures)
@@ -206,7 +223,7 @@ def denoise_image(
     denoised_img = fastNlMeansDenoising(
         img, None, h, templateWindowSize=template_window_size, searchWindowSize=search_window_size
     )
-
+    denoised_img = gaussian_filter(denoised_img, sigma=1)
     return denoised_img
 
 
@@ -219,7 +236,7 @@ def create_kmeans_mask(
     Input:
         img1: numpy array of the first image
         img2: numpy array of the second image
-        min_size: minimum size of objects to keep in the mask
+        object_min_size: minimum size of objects to keep in the mask
     Output:
         mask: mask of the differences between the two images
     """
@@ -250,16 +267,18 @@ def get_sorted_labels_kmeans(
     n_clusters: int = 3,
     init: tuple[list[int], ...] = ([10], [127], [220]),
 ) -> np.ndarray:
-    """Create a mask using kmeans for n instensity groups:
+    """
+    Create a mask using kmeans for n instensity groups:
     Input:
         img: numpy array of the image
         n_clusters: number of clusters for the kmeans
-        init: initial centers for the kmeans. Default is [[10], [127], [220]] for three clusters
+        init: initial centers for the kmeans. Default is ([10], [127], [220]) for three clusters
     Output:
-        mask: mask for the different clusters, sorted by centroids values"""
+        mask: mask for the different clusters, sorted by centroids values
+    """
 
     # Perform kmeans clustering:
-    model = KMeans(n_clusters=n_clusters, init=init, max_iter=1000, n_init="auto", tol=1e-5).fit(img.reshape(-1, 1))
+    model = KMeans(n_clusters=n_clusters, init=init, max_iter=1000, n_init="auto", tol=1e-4).fit(img.reshape(-1, 1))
     labels = model.labels_.reshape(img.shape)
     centers = model.cluster_centers_.reshape(-1)
 
@@ -277,19 +296,21 @@ def create_contours_mask(
     img2: np.ndarray,
     sigma_contour: int = 1,
     sigma_gaussian: int = 2,
-    kernel_size: int = 3,
-    object_min_size: int = 30,
+    kernel_size: int = 4,
+    object_min_size: int = 80,
 ) -> np.ndarray:
-    """Create a mask using the differences contours between the two images
+    """
+    Create a mask using the differences contours between the two images
     Input:
         img1: numpy array of the first image
         img2: numpy array of the second image
         sigma_contour: sigma value for the contour detection
         sigma_gaussian: sigma value for the gaussian filter
         kernel_size: size of the kernel for the contour detection
-        min_size: minimum size of objects to keep in the mask
+        object_min_size: minimum size of objects to keep in the mask
     Output:
-        mask: mask of the differences between the two images"""
+        mask: mask of the differences between the two images
+    """
 
     # Find contours in both images:
     img1_contour_mask = detect_contours(
@@ -315,7 +336,7 @@ def create_contours_mask(
     ssim = 1 - ssim
 
     # Threshold the ssim image:
-    threshold = skimage.filters.threshold_otsu(ssim)
+    threshold = threshold_otsu(ssim)
     ssim[ssim < threshold] = 0
     contours_mask = ssim * 255
     contours_mask = contours_mask.astype("uint8")
@@ -336,7 +357,8 @@ def detect_contours(
     low_threshold: int = 10,
     high_threshold: int = 20,
 ) -> np.ndarray:
-    """Detect contours in an image using Canny edge detection
+    """
+    Detect contours in an image using Canny edge detection
     Input:
         img: image
         sigma: sigma value for Canny edge detection
@@ -347,7 +369,7 @@ def detect_contours(
     Output:
         img_contour: image with contours
     """
-    img_contour = skimage.feature.canny(img, sigma, low_threshold, high_threshold)
+    img_contour = canny(img, sigma, low_threshold, high_threshold)
     img_contour = img_contour.astype("uint8")
     img_contour = dilation(img_contour, disk(kernel_size))
 
@@ -356,7 +378,7 @@ def detect_contours(
 
 def ssim_images(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
     # Calculate the structural similarity index between two images
-    score, diff_img = skimage.metrics.structural_similarity(img1, img2, full=True)
+    score, diff_img = structural_similarity(img1, img2, full=True)
 
     return diff_img
 
@@ -371,6 +393,7 @@ def find_and_remove_small_objects(img: np.ndarray, threshold: int = 20) -> np.nd
         img: np.ndarray of the image with the small objects removed
     """
     # find all connected components (white blobs in the image):
+    img = dilation(img, disk(1))
     blobs_count, img_with_separated_blobs, stats, _ = connectedComponentsWithStats(img)
 
     # Remove background from the list:
@@ -384,7 +407,8 @@ def find_and_remove_small_objects(img: np.ndarray, threshold: int = 20) -> np.nd
         if sizes[blob] >= threshold:
             # see description of im_with_separated_blobs above
             cleaned_img[img_with_separated_blobs == blob + 1] = 255
-
+    # Enlarge remaining object
+    cleaned_img = erosion(cleaned_img, disk(1))
     return cleaned_img
 
 
@@ -408,14 +432,13 @@ def plot_results(
 
 
 def main() -> None:
-    # Parse arguments:
-    parser = argparse.ArgumentParser(description="Find defects in an inspected image compared to a reference image")
-    parser.add_argument("--reference", type=str, required=True, help="path to reference image")
-    parser.add_argument("--inspected", type=str, required=True, help="path to inspected image")
-    args = parser.parse_args()
+    find_defects(
+        r"MuseAI_HomeExercise/home_exercise/defective_examples/case1_reference_image.tif",
+        r"MuseAI_HomeExercise/home_exercise/defective_examples/case1_inspected_image.tif",
+        should_plot=True,
+    )
 
-    # Find defects in the inspected image compared to the reference image:
-    find_defects(args.reference, args.inspected)
+    return
 
 
 if __name__ == "__main__":
