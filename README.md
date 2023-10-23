@@ -1,5 +1,5 @@
-# MuseAI_HomeExercise
-Detect differences between two similar images to find defects
+# Find defects based on differnces between two images
+Detect differences between two images to find defects
 
 ## Code environment:
 Python 			        3.11.2
